@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/xgb"
@@ -99,9 +100,11 @@ func main() {
 	var maxidletimeflag int
 	var maxidletime uint32
 	var lockapp string
+	var macaddr string
 	replaceId := uint32(0)
 	flag.IntVar(&maxidletimeflag, "idletime", 30, "Idle time before invoking lock")
-	flag.StringVar(&lockapp, "lockapp", "i3lock", "Command to invoe to lock")
+	flag.StringVar(&lockapp, "lockapp", "i3lock", "Command to invoke to lock")
+	flag.StringVar(&macaddr, "macaddr", "AA:BB:CC:DD:EE:FF", "Macaddress of device to check connection")
 	flag.Parse()
 	maxidletime = uint32(maxidletimeflag * 1000)
 
@@ -111,7 +114,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	devicepath := "/org/bluez/hci0/dev_A0_9E_1A_14_FE_10"
+	macaddr = strings.ToUpper(macaddr)
+	devicepath := fmt.Sprintf("/org/bluez/hci0/dev_%s", strings.ReplaceAll(macaddr, ":", "_"))
 	X, err := xgb.NewConn()
 	if err != nil {
 		log.Fatal(err)
