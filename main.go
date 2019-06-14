@@ -33,12 +33,8 @@ func isIdle(con *xgb.Conn, drawable xproto.Drawable, maxidletime uint32) bool {
 	return idletime > maxidletime
 }
 
-func waitForChange(conn *dbus.Conn, devicepath string) bool {
-	matches := []dbus.MatchOption{dbus.WithMatchOption("path", devicepath),
-		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
-		dbus.WithMatchMember("PropertiesChanged"),
-		dbus.WithMatchOption("arg0", "org.bluez.Device1")}
-	conn.AddMatchSignal(matches...)
+func waitForChange(conn *dbus.Conn, obj dbus.BusObject) bool {
+	obj.AddMatchSignal("org.freedesktop.DBus.Properties", "PropertiesChanged", dbus.WithMatchOption("arg0", "org.bluez.Device1"))
 
 	c := make(chan *dbus.Signal, 10)
 	conn.Signal(c)
@@ -48,7 +44,8 @@ func waitForChange(conn *dbus.Conn, devicepath string) bool {
 		if val, ok := changes["Connected"]; ok {
 			isconnected := val.Value().(bool)
 			log.Println("Isconnected", isconnected)
-			conn.RemoveMatchSignal(matches...)
+			obj.RemoveMatchSignal("org.freedesktop.DBus.Properties", "PropertiesChanged", dbus.WithMatchOption("arg0", "org.bluez.Device1"))
+			//conn.RemoveMatchSignal(matches...)
 			return isconnected
 		}
 	}
@@ -61,9 +58,14 @@ func lock(app []string) {
 	log.Println(err)
 }
 
-func tryConnect(conn *dbus.Conn, devicepath string) bool {
-	var connected dbus.Variant
+func getDevice(conn *dbus.Conn, devicepath string) (dbus.BusObject, error) {
 	obj := conn.Object("org.bluez", dbus.ObjectPath(devicepath))
+	_, err := obj.GetProperty("org.bluez.Device1.Connected")
+	return obj, err
+}
+
+func tryConnect(conn *dbus.Conn, obj dbus.BusObject) bool {
+	var connected dbus.Variant
 	connected, _ = obj.GetProperty("org.bluez.Device1.Connected")
 	if !connected.Value().(bool) {
 		log.Println("Not connected, trying to connect")
@@ -72,14 +74,14 @@ func tryConnect(conn *dbus.Conn, devicepath string) bool {
 	}
 	if connected.Value().(bool) {
 		log.Println("Connected waiting for connection to terminate")
-		waitForChange(conn, devicepath)
+		waitForChange(conn, obj)
 		return true
 	}
 	return false
 }
 
-func sendNotification(conn *dbus.Conn, message string, replaceId uint32) uint32 {
-	iconName := "mail-unread"
+func sendNotification(conn *dbus.Conn, message string, replaceId uint32, level byte) uint32 {
+	iconName := "locked"
 	n := notify.Notification{
 		AppName:       "BT Autolocker",
 		ReplacesID:    replaceId,
@@ -87,11 +89,10 @@ func sendNotification(conn *dbus.Conn, message string, replaceId uint32) uint32 
 		Summary:       "BT Autolocker",
 		Body:          message,
 		Actions:       []string{}, // tuples of (action_key, label)
-		Hints:         map[string]dbus.Variant{},
+		Hints:         map[string]dbus.Variant{"urgency": dbus.MakeVariant(level)},
 		ExpireTimeout: int32(5000),
 	}
 
-	// Ship it!
 	createdID, _ := notify.SendNotification(conn, n)
 	return createdID
 }
@@ -101,10 +102,11 @@ func main() {
 	var maxidletime uint32
 	var lockapp string
 	var macaddr string
+	var device dbus.BusObject
 	replaceId := uint32(0)
 	flag.IntVar(&maxidletimeflag, "idletime", 30, "Idle time before invoking lock")
 	flag.StringVar(&lockapp, "lockapp", "i3lock", "Command to invoke to lock")
-	flag.StringVar(&macaddr, "macaddr", "AA:BB:CC:DD:EE:FF", "Macaddress of device to check connection")
+	flag.StringVar(&macaddr, "macaddr", "", "Macaddress of device to check connection")
 	flag.Parse()
 	maxidletime = uint32(maxidletimeflag * 1000)
 
@@ -135,7 +137,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	sendNotification(sessionbus, "Autolocker started", replaceId)
+	if macaddr != "" {
+		device, err = getDevice(conn, devicepath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Device %s is not know please pair it first\n", macaddr)
+			os.Exit(1)
+		}
+	}
+
+	replaceId = sendNotification(sessionbus, "Autolocker started", replaceId, byte(1))
 
 	for {
 		idletime, _ := getIdleTime(X, scr)
@@ -145,8 +155,12 @@ func main() {
 			time.Sleep(time.Duration(sleeptime) * time.Millisecond)
 			continue
 		}
-		if !tryConnect(conn, devicepath) {
-			sendNotification(sessionbus, "Locking in 5 seconds", replaceId)
+		showwarning := true
+		if macaddr != "" {
+			showwarning = !tryConnect(conn, device)
+		}
+		if showwarning {
+			replaceId = sendNotification(sessionbus, "Locking in 5 seconds", replaceId, byte(2))
 			time.Sleep(time.Duration(5) * time.Second)
 			if isIdle(X, scr, maxidletime) {
 				log.Println("Locking now")
@@ -155,7 +169,6 @@ func main() {
 			}
 		} else {
 			lock(app)
-
 		}
 	}
 
