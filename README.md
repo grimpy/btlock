@@ -13,11 +13,11 @@ This application works only on Linux in combination with Xorg uses bluez dbus in
 ## Usage:
 
 ```
-Usage of /tmp/go-build836085537/b001/exe/main:
+Usage of /tmp/go-build122752904/b001/exe/main:
   -idletime int
-        Idle time before invoking lock (default 30)
+        Idle time before invoking lock (by default this is taken from xserver state)
   -lockapp string
         Command to invoke to lock (default "i3lock")
   -macaddr string
-        Macaddress of device to check connection (default "AA:BB:CC:DD:EE:FF")
+        Macaddress of device to check connection
 ```

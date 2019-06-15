@@ -17,20 +17,33 @@ import (
 	"github.com/google/shlex"
 )
 
-func getIdleTime(con *xgb.Conn, drawable xproto.Drawable) (uint32, error) {
+func getSleepTime(con *xgb.Conn, drawable xproto.Drawable, maxsleeptime uint32) (uint32, error) {
 
 	request := screensaver.QueryInfo(con, drawable)
 	qinfo, err := request.Reply()
 	if err != nil {
 		return 0, err
 	}
-	return qinfo.MsSinceUserInput, nil
+	log.Println("State", qinfo.State)
+	log.Println("Until", qinfo.MsUntilServer)
+	if maxsleeptime == 0 {
+		switch qinfo.State {
+		case 0:
+			return qinfo.MsUntilServer, nil
+		case 1:
+			return 0, nil
+		default:
+			log.Println("Screensaver disabled")
+			return 60000, nil
+		}
+	} else {
+		return maxsleeptime - qinfo.MsSinceUserInput, nil
+	}
 }
 
 func isIdle(con *xgb.Conn, drawable xproto.Drawable, maxidletime uint32) bool {
-	idletime, _ := getIdleTime(con, drawable)
-	log.Println("Idle time", idletime)
-	return idletime > maxidletime
+	sleeptime, _ := getSleepTime(con, drawable, maxidletime)
+	return sleeptime == 0
 }
 
 func waitForChange(conn *dbus.Conn, obj dbus.BusObject) bool {
@@ -104,7 +117,7 @@ func main() {
 	var macaddr string
 	var device dbus.BusObject
 	replaceId := uint32(0)
-	flag.IntVar(&maxidletimeflag, "idletime", 30, "Idle time before invoking lock")
+	flag.IntVar(&maxidletimeflag, "idletime", 0, "Idle time before invoking lock (by default this is taken from xserver state)")
 	flag.StringVar(&lockapp, "lockapp", "i3lock", "Command to invoke to lock")
 	flag.StringVar(&macaddr, "macaddr", "", "Macaddress of device to check connection")
 	flag.Parse()
@@ -122,7 +135,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println(X.DisplayNumber)
 	scr := xproto.Drawable(xproto.Setup(X).DefaultScreen(X).Root)
 	screensaver.Init(X)
 
@@ -148,9 +160,8 @@ func main() {
 	replaceId = sendNotification(sessionbus, "Autolocker started", replaceId, byte(1))
 
 	for {
-		idletime, _ := getIdleTime(X, scr)
-		if idletime < maxidletime {
-			sleeptime := maxidletime - idletime
+		sleeptime, _ := getSleepTime(X, scr, maxidletime)
+		if sleeptime > 0 {
 			log.Println("Sleeping for ", sleeptime/1000)
 			time.Sleep(time.Duration(sleeptime) * time.Millisecond)
 			continue
