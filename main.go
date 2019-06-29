@@ -26,18 +26,14 @@ func getSleepTime(con *xgb.Conn, drawable xproto.Drawable, maxsleeptime uint32) 
 	}
 	log.Println("State", qinfo.State)
 	log.Println("Until", qinfo.MsUntilServer)
-	if maxsleeptime == 0 {
-		switch qinfo.State {
-		case 0:
-			return qinfo.MsUntilServer, nil
-		case 1:
-			return 0, nil
-		default:
-			log.Println("Screensaver disabled")
-			return 60000, nil
-		}
-	} else {
+	switch qinfo.State {
+	case 0:
 		return maxsleeptime - qinfo.MsSinceUserInput, nil
+	case 1:
+		return 0, nil
+	default:
+		log.Println("Screensaver disabled")
+		return 60000, nil
 	}
 }
 
@@ -79,11 +75,17 @@ func getDevice(conn *dbus.Conn, devicepath string) (dbus.BusObject, error) {
 
 func tryConnect(conn *dbus.Conn, obj dbus.BusObject) bool {
 	var connected dbus.Variant
-	connected, _ = obj.GetProperty("org.bluez.Device1.Connected")
+	connected, err := obj.GetProperty("org.bluez.Device1.Connected")
+	if err != nil {
+		return false
+	}
 	if !connected.Value().(bool) {
 		log.Println("Not connected, trying to connect")
 		obj.Call("org.bluez.Device1.Connect", dbus.FlagNoAutoStart)
-		connected, _ = obj.GetProperty("org.bluez.Device1.Connected")
+		connected, err = obj.GetProperty("org.bluez.Device1.Connected")
+		if err != nil {
+			return false
+		}
 	}
 	if connected.Value().(bool) {
 		log.Println("Connected waiting for connection to terminate")
@@ -117,7 +119,7 @@ func main() {
 	var macaddr string
 	var device dbus.BusObject
 	replaceId := uint32(0)
-	flag.IntVar(&maxidletimeflag, "idletime", 0, "Idle time before invoking lock (by default this is taken from xserver state)")
+	flag.IntVar(&maxidletimeflag, "idletime", 30, "Idle time before invoking lock (by default this is taken from xserver state)")
 	flag.StringVar(&lockapp, "lockapp", "i3lock", "Command to invoke to lock")
 	flag.StringVar(&macaddr, "macaddr", "", "Macaddress of device to check connection")
 	flag.Parse()
