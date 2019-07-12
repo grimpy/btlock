@@ -28,7 +28,11 @@ func getSleepTime(con *xgb.Conn, drawable xproto.Drawable, maxsleeptime uint32) 
 	log.Println("Until", qinfo.MsUntilServer)
 	switch qinfo.State {
 	case 0:
-		return maxsleeptime - qinfo.MsSinceUserInput, nil
+		if qinfo.MsSinceUserInput > maxsleeptime {
+			return 0, nil
+		} else {
+			return maxsleeptime - qinfo.MsSinceUserInput, nil
+		}
 	case 1:
 		return 0, nil
 	default:
